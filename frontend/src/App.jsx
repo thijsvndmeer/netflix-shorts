@@ -1,121 +1,93 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useEffect, useRef } from 'react'
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [video, setVideo] = useState(null)
+  const [liked, setLiked] = useState(false)
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const lastScrollTime = useRef(0)
+
+  const fetchRandomShort = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/random-short')
+      const data = await res.json()
+      if (data.error) {
+        setError(data.error)
+      } else {
+        setVideo(data)
+        const isLiked = localStorage.getItem(`like_${data.video_name}`) === 'true'
+        setLiked(isLiked)
+      }
+    } catch (err) {
+      setError('Failed to fetch video: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchRandomShort()
+  }, [])
+
+  useEffect(() => {
+    const handleWheel = (e) => {
+      const now = Date.now()
+      if (now - lastScrollTime.current > 1500) {
+        if (e.deltaY > 50) {
+          lastScrollTime.current = now
+          fetchRandomShort()
+        }
+      }
+    }
+    window.addEventListener('wheel', handleWheel)
+    return () => window.removeEventListener('wheel', handleWheel)
+  }, [])
+
+  const toggleLike = () => {
+    if (!video) return
+    const nextLiked = !liked
+    setLiked(nextLiked)
+    localStorage.setItem(`like_${video.video_name}`, String(nextLiked))
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
+    <div style={{ textAlign: 'center', padding: '20px' }}>
+      <h1>Netflix Shorts</h1>
+      
+      {loading && <p>Loading next video...</p>}
+      {error && <p style={{ color: 'red' }}>Error: {error}</p>}
+
+      {video && (
         <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
+          <h3>Playing: {video.video_name}</h3>
+          <video
+            key={video.video_name}
+            src={`/api/stream/${video.video_name}`}
+            controls
+            autoPlay
+            loop
+            style={{ width: '300px', height: '530px', display: 'block', margin: '10px auto', background: '#222' }}
+          />
+          <div>
+            <button 
+              onClick={toggleLike} 
+              style={{ fontSize: '18px', padding: '10px 20px', margin: '5px', cursor: 'pointer' }}
+            >
+              {liked ? 'Liked ❤️' : 'Like 🤍'}
+            </button>
+            <button 
+              onClick={fetchRandomShort} 
+              style={{ fontSize: '18px', padding: '10px 20px', margin: '5px', cursor: 'pointer' }}
+            >
+              Scroll / Next Video ➡️
+            </button>
+          </div>
+          <p style={{ color: '#888', fontSize: '12px' }}>Tip: Scroll down with mouse wheel to load next video</p>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      )}
+    </div>
   )
 }
 

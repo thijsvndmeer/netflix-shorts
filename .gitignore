@@ -43,3 +43,6 @@ systeemproject_cmd/
 
 #pycache backend
 backend/__pycache__
+
+# venv
+backend/.venv/
