@@ -40,3 +40,6 @@ next-env.d.ts
 
 #dataset
 systeemproject_cmd/
+
+#pycache backend
+backend/__pycache__
