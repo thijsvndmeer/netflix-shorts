@@ -17,7 +17,7 @@ function App() {
         setError(data.error)
       } else {
         setVideo(data)
-        const isLiked = localStorage.getItem(`like_${data.video_name}`) === 'true'
+        const isLiked = localStorage.getItem(`like_${data.yt_id}`) === 'true'
         setLiked(isLiked)
       }
     } catch (err) {
@@ -49,7 +49,7 @@ function App() {
     if (!video) return
     const nextLiked = !liked
     setLiked(nextLiked)
-    localStorage.setItem(`like_${video.video_name}`, String(nextLiked))
+    localStorage.setItem(`like_${video.yt_id}`, String(nextLiked))
   }
 
   return (
@@ -61,14 +61,14 @@ function App() {
 
       {video && (
         <div>
-          <h3>Playing: {video.video_name}</h3>
-          <video
-            key={video.video_name}
-            src={`/api/stream/${video.video_name}`}
-            controls
-            autoPlay
-            loop
-            style={{ width: '300px', height: '530px', display: 'block', margin: '10px auto', background: '#222' }}
+          <h3>Playing: {video.title}</h3>
+          <iframe
+            key={video.yt_id}
+            src={`https://www.youtube.com/embed/${video.yt_id}?autoplay=1&mute=1&loop=1&playlist=${video.yt_id}&playsinline=1`}
+            title={video.title}
+            style={{ width: '300px', height: '530px', display: 'block', margin: '10px auto', background: '#222', border: 'none' }}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
           />
           <div>
             <button 
