@@ -5,24 +5,38 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-# Bepaal het juiste pad naar je CSV-bestand
-CSV_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "datacsv", "yt2imdb.csv")
-)
+# Bepaal het pad naar de map met je CSV-bestanden
+CSV_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "datacsv"))
+YT_CSV_PATH = os.path.join(CSV_DIR, "yt2imdb.csv")
+IMDB_CSV_PATH = os.path.join(CSV_DIR, "imdb_metadata.csv")
 
-def load_youtube_ids():
-    """Leest de CSV-file en geeft een lijst van yt_ids terug."""
-    if not os.path.exists(CSV_PATH):
-        raise FileNotFoundError(f"CSV-bestand niet gevonden op: {CSV_PATH}")
-    
-    yt_ids = []
-    with open(CSV_PATH, mode='r', encoding='utf-8') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            # Voeg de yt_id toe aan de lijst als deze bestaat
+def load_data():
+    """Leest beide CSV-files en combineert de data."""
+    if not os.path.exists(YT_CSV_PATH):
+        raise FileNotFoundError(f"YouTube CSV niet gevonden op: {YT_CSV_PATH}")
+    if not os.path.exists(IMDB_CSV_PATH):
+        raise FileNotFoundError(f"IMDb metadata CSV niet gevonden op: {IMDB_CSV_PATH}")
+
+    # 1. Laad de IMDb metadata in een dictionary (voor supersnel zoeken)
+    imdb_titles = {}
+    with open(IMDB_CSV_PATH, mode='r', encoding='utf-8') as meta_file:
+        meta_reader = csv.DictReader(meta_file)
+        for row in meta_reader:
+            if row.get("imdb_id") and row.get("title"):
+                imdb_titles[row["imdb_id"]] = row["title"]
+
+    # 2. Laad de YouTube IDs en hun bijbehorende IMDb IDs in een lijst
+    yt_data = []
+    with open(YT_CSV_PATH, mode='r', encoding='utf-8') as yt_file:
+        yt_reader = csv.DictReader(yt_file)
+        for row in yt_reader:
             if row.get("yt_id"):
-                yt_ids.append(row["yt_id"])
-    return yt_ids
+                yt_data.append({
+                    "yt_id": row["yt_id"],
+                    "imdb_id": row.get("imdb_id", "")
+                })
+                
+    return yt_data, imdb_titles
 
 @app.get("/")
 def home():
@@ -31,20 +45,26 @@ def home():
 @app.get("/api/random-short")
 def get_random_short():
     try:
-        # 1. Laad de YouTube IDs uit de CSV
-        yt_ids = load_youtube_ids()
+        # Laad de data (YouTube lijst + IMDb titels dictionary)
+        yt_data, imdb_titles = load_data()
     except FileNotFoundError as e:
         return {"error": str(e)}
     
-    # 2. Check of de CSV wel gevuld is
-    if not yt_ids:
+    # Check of we daadwerkelijk YouTube IDs hebben
+    if not yt_data:
         return {"error": "Geen YouTube IDs gevonden in het CSV-bestand."}
     
-    # 3. Kies een willekeurige YouTube ID
-    random_yt_id = random.choice(yt_ids)
+    # Kies een willekeurige video uit de lijst
+    random_clip = random.choice(yt_data)
+    yt_id = random_clip["yt_id"]
+    imdb_id = random_clip["imdb_id"]
     
-    # 4. Stuur de YouTube ID en de kant-en-klare YouTube URL terug
+    # Zoek de titel op basis van de imdb_id (geef "Titel onbekend" terug als hij ontbreekt)
+    movie_title = imdb_titles.get(imdb_id, "Titel onbekend")
+    
+    # Stuur alles netjes terug naar de frontend
     return {
-        "yt_id": random_yt_id,
-        "video_url": f"https://www.youtube.com/watch?v={random_yt_id}"
+        "yt_id": yt_id,
+        "imdb_id": imdb_id,
+        "title": movie_title
     }
