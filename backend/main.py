@@ -1,14 +1,28 @@
 import os
 import random
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+import csv
+from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-# We hebben nu "movie_clips" toegevoegd aan het pad!
-VIDEO_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "systeemproject_cmd", "movie_clips")
+# Bepaal het juiste pad naar je CSV-bestand
+CSV_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "datacsv", "yt2imdb.csv")
 )
+
+def load_youtube_ids():
+    """Leest de CSV-file en geeft een lijst van yt_ids terug."""
+    if not os.path.exists(CSV_PATH):
+        raise FileNotFoundError(f"CSV-bestand niet gevonden op: {CSV_PATH}")
+    
+    yt_ids = []
+    with open(CSV_PATH, mode='r', encoding='utf-8') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            # Voeg de yt_id toe aan de lijst als deze bestaat
+            if row.get("yt_id"):
+                yt_ids.append(row["yt_id"])
+    return yt_ids
 
 @app.get("/")
 def home():
@@ -16,32 +30,21 @@ def home():
 
 @app.get("/api/random-short")
 def get_random_short():
-    # 1. Controleer of de map überhaupt bestaat
-    if not os.path.exists(VIDEO_DIR):
-        return {"error": f"Map niet gevonden op pad: {VIDEO_DIR}"}
+    try:
+        # 1. Laad de YouTube IDs uit de CSV
+        yt_ids = load_youtube_ids()
+    except FileNotFoundError as e:
+        return {"error": str(e)}
     
-    # 2. Haal alle bestanden op uit de map die eindigen op een video-extensie (bijv. .mp4)
-    video_extensions = (".mp4", ".mov", ".avi", ".mkv")
-    all_videos = [f for f in os.listdir(VIDEO_DIR) if f.lower().endswith(video_extensions)]
+    # 2. Check of de CSV wel gevuld is
+    if not yt_ids:
+        return {"error": "Geen YouTube IDs gevonden in het CSV-bestand."}
     
-    # 3. Check of er wel video's in de map staan
-    if not all_videos:
-        return {"error": "Geen video's gevonden in de map 'systeemproject_cmd'."}
+    # 3. Kies een willekeurige YouTube ID
+    random_yt_id = random.choice(yt_ids)
     
-    # 4. Kies een willekeurige video uit de lijst
-    random_video = random.choice(all_videos)
-    
-    # 5. Stuur de naam van de video terug naar de frontend
+    # 4. Stuur de YouTube ID en de kant-en-klare YouTube URL terug
     return {
-        "video_name": random_video,
-        "video_url": f"http://localhost:8000/api/stream/{random_video}"
+        "yt_id": random_yt_id,
+        "video_url": f"https://www.youtube.com/watch?v={random_yt_id}"
     }
-
-@app.get("/api/stream/{video_name}")
-def stream_video(video_name: str):
-    # Dit endpoint zorgt ervoor dat de video daadwerkelijk afgespeeld kan worden in de browser
-    video_path = os.path.join(VIDEO_DIR, video_name)
-    
-    if os.path.exists(video_path):
-        return FileResponse(video_path, media_type="video/mp4")
-    return {"error": "Video bestand niet gevonden."}
