@@ -91,3 +91,61 @@ def restructure_features(input_file, output_file):
 
         for group in groups:
                 del f[group]
+
+
+class recommender():
+    def __init__(self, data_file):
+        self.feature_file = data_file
+        print(f'recommender enabled with video embeddings from {self.feature_file}')
+
+    def change_file(self, data_file):
+        self.feature_file = data_file
+        print(f'changed datafile to {self.feature_file}')
+
+######################################################################################################################################################################################################################################################################################################################################################################################
+
+    def recommend(self, user_data, n: int = 5):
+        #step 1: Construct sim_matrix based on user data
+        sim_matrix = pd.DataFrame(columns=user_data['videos'])
+
+
+        #loop over each column and calculate the similarity score.
+        for column in sim_matrix:
+            content = []
+
+            with h5py.File(self.feature_file, 'r') as f:
+                feature_one = f[column][:]
+
+                #calculate the cosine_sim between each video in the dataset  (include a random factor to maybe reduce compute if necessary)
+                for video, obj in f.items():
+                    #skips to the next video if it is in the user data, thereby insuring that a video is never recommende twice (can maybe be changed later idk)
+                    if video in user_data['videos'].values:
+                        continue
+                    feature_two = obj[:]
+                    cos_sim = np.dot(feature_one, feature_two) / (np.linalg.norm(feature_one) * np.linalg.norm(feature_two))
+                    content.append(cos_sim)
+
+
+            sim_matrix[column] = content
+
+        print(sim_matrix)
+        #step 2: find the k nearest neighbours for each video and vote
+
+
+        #step 3: randomly select n recommendations
+
+
+
+
+
+
+######################################################################################################################################################################################################################################################################################################################################################################################
+
+def user_example():
+    data = {
+    'videos': ['--Jiv5iYqT8', '-JhNO_E3aEE', '0AspXDFcGlw', '29YDqiuyaOU', 'Gh9kc9DiDnE'],
+    'liked': [1, 0, 0, 0, 0],
+    'watched': [0.8, 0.02, 0.05, 0.9, 1.9]
+    }
+    user_data = pd.DataFrame(data)
+    return(user_data)
