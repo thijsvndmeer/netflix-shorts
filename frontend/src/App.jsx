@@ -34,11 +34,11 @@ function App() {
       const timeSpent = (Date.now() - videoStartTime.current) / 1000
       const clipLen = prev.clip_length
       if (clipLen && clipLen > 0) {
-        const pct = Math.min(Math.round((timeSpent / clipLen) * 100), 100)
+        const pct = Math.round((timeSpent / clipLen) * 100)
         setWatchProgress(old => {
-          // Keep highest % if video watched multiple times
+          // Accumulate across watches
           const existing = old[prev.yt_id] || 0
-          const best = Math.max(existing, pct)
+          const best = existing + pct
           const next = { ...old, [prev.yt_id]: best }
           lsSet('watchProgress', next)
           return next
@@ -184,7 +184,7 @@ function App() {
                         {isLiked && <span style={{ marginLeft: '8px' }}>❤️</span>}
                         {pct != null && (
                           <span style={{ color: '#4a9', fontSize: '12px', marginLeft: '8px' }}>
-                            {pct}% watched
+                            {pct} watched
                           </span>
                         )}
                         {watchTimes[ytId] && (
