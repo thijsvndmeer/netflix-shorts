@@ -41,8 +41,9 @@ next-env.d.ts
 #dataset
 systeemproject_cmd/
 
-#pycache backend
+#pycache
 backend/__pycache__
+backend/recommender_system/__pycache__
 
 # venv
 backend/.venv/

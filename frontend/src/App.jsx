@@ -1,13 +1,71 @@
 import { useState, useEffect, useRef } from 'react'
+import { useCookies } from 'react-cookie'
+
+// localStorage helpers
+const lsGet = (key, fallback) => {
+  try {
+    const val = localStorage.getItem(key)
+    return val ? JSON.parse(val) : fallback
+  } catch { return fallback }
+}
+const lsSet = (key, val) => localStorage.setItem(key, JSON.stringify(val))
 
 function App() {
   const [video, setVideo] = useState(null)
   const [liked, setLiked] = useState(false)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [watchedVideos, setWatchedVideos] = useState(() => lsGet('watchedVideos', []))
+  const [watchTimes, setWatchTimes] = useState(() => lsGet('watchTimes', {}))
+  const [watchProgress, setWatchProgress] = useState(() => lsGet('watchProgress', {}))
   const lastScrollTime = useRef(0)
+  const videoStartTime = useRef(null)
+  const currentVideoRef = useRef(null)
+
+  const [cookies, setCookie] = useCookies(['likedVideos'])
+
+  const getLiked = () => cookies.likedVideos || []
+
+  // Save % watched for the current video before switching
+  const saveProgress = () => {
+    const prev = currentVideoRef.current
+    if (prev && prev.yt_id && videoStartTime.current) {
+      const timeSpent = (Date.now() - videoStartTime.current) / 1000
+      const clipLen = prev.clip_length
+      if (clipLen && clipLen > 0) {
+        const pct = Math.min(Math.round((timeSpent / clipLen) * 100), 100)
+        setWatchProgress(old => {
+          // Keep highest % if video watched multiple times
+          const existing = old[prev.yt_id] || 0
+          const best = Math.max(existing, pct)
+          const next = { ...old, [prev.yt_id]: best }
+          lsSet('watchProgress', next)
+          return next
+        })
+      }
+    }
+  }
+
+  const recordWatch = (ytId) => {
+    setWatchedVideos(prev => {
+      if (prev.includes(ytId)) return prev
+      const next = [...prev, ytId]
+      lsSet('watchedVideos', next)
+      return next
+    })
+    setWatchTimes(prev => {
+      if (prev[ytId]) return prev
+      const next = { ...prev, [ytId]: new Date().toISOString() }
+      lsSet('watchTimes', next)
+      return next
+    })
+  }
 
   const fetchRandomShort = async () => {
+    // Save progress of current video before loading next
+    saveProgress()
+
     setLoading(true)
     setError(null)
     try {
@@ -17,8 +75,13 @@ function App() {
         setError(data.error)
       } else {
         setVideo(data)
-        const isLiked = localStorage.getItem(`like_${data.yt_id}`) === 'true'
-        setLiked(isLiked)
+        currentVideoRef.current = data
+        videoStartTime.current = Date.now()
+        // Check if this video is liked via cookie
+        const likedList = getLiked()
+        setLiked(likedList.includes(data.yt_id))
+        // Record this video as watched + timestamp
+        recordWatch(data.yt_id)
       }
     } catch (err) {
       setError('Failed to fetch video: ' + err.message)
@@ -29,6 +92,10 @@ function App() {
 
   useEffect(() => {
     fetchRandomShort()
+    // Save progress when user leaves page
+    const handleBeforeUnload = () => saveProgress()
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [])
 
   useEffect(() => {
@@ -47,9 +114,18 @@ function App() {
 
   const toggleLike = () => {
     if (!video) return
-    const nextLiked = !liked
-    setLiked(nextLiked)
-    localStorage.setItem(`like_${video.yt_id}`, String(nextLiked))
+    const likedList = getLiked()
+    let nextLiked
+    if (likedList.includes(video.yt_id)) {
+      // Remove from liked
+      nextLiked = likedList.filter(id => id !== video.yt_id)
+      setLiked(false)
+    } else {
+      // Add to liked
+      nextLiked = [...likedList, video.yt_id]
+      setLiked(true)
+    }
+    setCookie('likedVideos', nextLiked)
   }
 
   return (
@@ -83,8 +159,46 @@ function App() {
             >
               Scroll / Next Video ➡️
             </button>
+            <button 
+              onClick={() => setShowHistory(!showHistory)} 
+              style={{ fontSize: '18px', padding: '10px 20px', margin: '5px', cursor: 'pointer' }}
+            >
+              {showHistory ? 'Hide History ✕' : 'History 📜'}
+            </button>
           </div>
           <p style={{ color: '#888', fontSize: '12px' }}>Tip: Scroll down with mouse wheel to load next video</p>
+
+          {showHistory && (
+            <div style={{ marginTop: '15px', textAlign: 'left', maxWidth: '400px', margin: '15px auto 0' }}>
+              <h3>Watch History</h3>
+              {watchedVideos.length === 0 ? (
+                <p style={{ color: '#888' }}>No videos watched yet.</p>
+              ) : (
+                <ul style={{ listStyle: 'none', padding: 0 }}>
+                  {watchedVideos.map(ytId => {
+                    const isLiked = getLiked().includes(ytId)
+                    const pct = watchProgress[ytId]
+                    return (
+                      <li key={ytId} style={{ padding: '8px 0', borderBottom: '1px solid #333' }}>
+                        <span>{ytId}</span>
+                        {isLiked && <span style={{ marginLeft: '8px' }}>❤️</span>}
+                        {pct != null && (
+                          <span style={{ color: '#4a9', fontSize: '12px', marginLeft: '8px' }}>
+                            {pct}% watched
+                          </span>
+                        )}
+                        {watchTimes[ytId] && (
+                          <span style={{ color: '#888', fontSize: '12px', marginLeft: '8px' }}>
+                            {new Date(watchTimes[ytId]).toLocaleString()}
+                          </span>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
