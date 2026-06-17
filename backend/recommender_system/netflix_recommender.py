@@ -92,10 +92,13 @@ def restructure_features(input_file, output_file):
         for group in groups:
                 del f[group]
 
-
 class recommender():
-    def __init__(self, data_file):
+    def __init__(self, data_file, n: int = 5, k: int = 3, like_strenght: bool = 1.4, threshold: bool = 1.3, method: str = 'top'):
+        self.n = n
+        self.k = k
+        self.like = like_strenght
         self.feature_file = data_file
+        self.threshold = threshold
         print(f'recommender enabled with video embeddings from {self.feature_file}')
 
     def change_file(self, data_file):
@@ -104,7 +107,7 @@ class recommender():
 
 ######################################################################################################################################################################################################################################################################################################################################################################################
 
-    def recommend(self, user_data, n: int = 5):
+    def recommend(self, user_data):
         #step 1: Construct sim_matrix based on user data
         sim_matrix = pd.DataFrame(columns=user_data['videos'])
 
@@ -112,9 +115,11 @@ class recommender():
         #loop over each column and calculate the similarity score.
         for column in sim_matrix:
             content = []
+            index = []
 
             with h5py.File(self.feature_file, 'r') as f:
                 feature_one = f[column][:]
+
 
                 #calculate the cosine_sim between each video in the dataset  (include a random factor to maybe reduce compute if necessary)
                 for video, obj in f.items():
@@ -124,22 +129,24 @@ class recommender():
                     feature_two = obj[:]
                     cos_sim = np.dot(feature_one, feature_two) / (np.linalg.norm(feature_one) * np.linalg.norm(feature_two))
                     content.append(cos_sim)
+                    index.append(video)
 
 
             sim_matrix[column] = content
+            sim_matrix.index = index
 
-        print(sim_matrix)
         #step 2: find the k nearest neighbours for each video and vote
+        recommend = pd.Series()
+
+        for video, data in sim_matrix.iterrows():
+            k_nearest = data.nlargest(self.k)
+            video_value = sum([user_data.loc[user_data['videos'] == video, 'watched'].item() * (1 + ((self.like - 1)* user_data.loc[user_data['videos'] == video, 'liked'].item())) * k_nearest[video] for video in k_nearest.index]) / k_nearest.sum()
+
+            if video_value > self.threshold: recommend[video] = video_value
 
 
-        #step 3: randomly select n recommendations
-
-
-
-
-
-
-######################################################################################################################################################################################################################################################################################################################################################################################
+        #step 3: randomly select videos to recommend
+        return([video for video, value in recommend.nlargest(self.n).items()])
 
 def user_example():
     data = {
