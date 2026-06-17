@@ -33,7 +33,8 @@ def load_data():
             if row.get("yt_id"):
                 yt_data.append({
                     "yt_id": row["yt_id"],
-                    "imdb_id": row.get("imdb_id", "")
+                    "imdb_id": row.get("imdb_id", ""),
+                    "clip_length": row.get("clip_length", "")
                 })
                 
     return yt_data, imdb_titles
@@ -58,6 +59,7 @@ def get_random_short():
     random_clip = random.choice(yt_data)
     yt_id = random_clip["yt_id"]
     imdb_id = random_clip["imdb_id"]
+    clip_length = random_clip.get("clip_length", "")
     
     # Zoek de titel op basis van de imdb_id (geef "Titel onbekend" terug als hij ontbreekt)
     movie_title = imdb_titles.get(imdb_id, "Titel onbekend")
@@ -66,5 +68,6 @@ def get_random_short():
     return {
         "yt_id": yt_id,
         "imdb_id": imdb_id,
-        "title": movie_title
+        "title": movie_title,
+        "clip_length": float(clip_length) if clip_length else None
     }

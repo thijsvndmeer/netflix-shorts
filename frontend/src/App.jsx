@@ -18,11 +18,34 @@ function App() {
   const [showHistory, setShowHistory] = useState(false)
   const [watchedVideos, setWatchedVideos] = useState(() => lsGet('watchedVideos', []))
   const [watchTimes, setWatchTimes] = useState(() => lsGet('watchTimes', {}))
+  const [watchProgress, setWatchProgress] = useState(() => lsGet('watchProgress', {}))
   const lastScrollTime = useRef(0)
+  const videoStartTime = useRef(null)
+  const currentVideoRef = useRef(null)
 
   const [cookies, setCookie] = useCookies(['likedVideos'])
 
   const getLiked = () => cookies.likedVideos || []
+
+  // Save % watched for the current video before switching
+  const saveProgress = () => {
+    const prev = currentVideoRef.current
+    if (prev && prev.yt_id && videoStartTime.current) {
+      const timeSpent = (Date.now() - videoStartTime.current) / 1000
+      const clipLen = prev.clip_length
+      if (clipLen && clipLen > 0) {
+        const pct = Math.min(Math.round((timeSpent / clipLen) * 100), 100)
+        setWatchProgress(old => {
+          // Keep highest % if video watched multiple times
+          const existing = old[prev.yt_id] || 0
+          const best = Math.max(existing, pct)
+          const next = { ...old, [prev.yt_id]: best }
+          lsSet('watchProgress', next)
+          return next
+        })
+      }
+    }
+  }
 
   const recordWatch = (ytId) => {
     setWatchedVideos(prev => {
@@ -40,6 +63,9 @@ function App() {
   }
 
   const fetchRandomShort = async () => {
+    // Save progress of current video before loading next
+    saveProgress()
+
     setLoading(true)
     setError(null)
     try {
@@ -49,6 +75,8 @@ function App() {
         setError(data.error)
       } else {
         setVideo(data)
+        currentVideoRef.current = data
+        videoStartTime.current = Date.now()
         // Check if this video is liked via cookie
         const likedList = getLiked()
         setLiked(likedList.includes(data.yt_id))
@@ -64,6 +92,10 @@ function App() {
 
   useEffect(() => {
     fetchRandomShort()
+    // Save progress when user leaves page
+    const handleBeforeUnload = () => saveProgress()
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [])
 
   useEffect(() => {
@@ -145,10 +177,16 @@ function App() {
                 <ul style={{ listStyle: 'none', padding: 0 }}>
                   {watchedVideos.map(ytId => {
                     const isLiked = getLiked().includes(ytId)
+                    const pct = watchProgress[ytId]
                     return (
                       <li key={ytId} style={{ padding: '8px 0', borderBottom: '1px solid #333' }}>
                         <span>{ytId}</span>
                         {isLiked && <span style={{ marginLeft: '8px' }}>❤️</span>}
+                        {pct != null && (
+                          <span style={{ color: '#4a9', fontSize: '12px', marginLeft: '8px' }}>
+                            {pct}% watched
+                          </span>
+                        )}
                         {watchTimes[ytId] && (
                           <span style={{ color: '#888', fontSize: '12px', marginLeft: '8px' }}>
                             {new Date(watchTimes[ytId]).toLocaleString()}
