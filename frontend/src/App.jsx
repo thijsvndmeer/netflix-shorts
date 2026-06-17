@@ -10,12 +10,17 @@ const lsGet = (key, fallback) => {
 }
 const lsSet = (key, val) => localStorage.setItem(key, JSON.stringify(val))
 
+// Minimum watched videos before we try recommendations
+const REC_THRESHOLD = 3
+
 function App() {
   const [video, setVideo] = useState(null)
   const [liked, setLiked] = useState(false)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [isRecommended, setIsRecommended] = useState(false)
+  const [recQueue, setRecQueue] = useState([])
   const [watchedVideos, setWatchedVideos] = useState(() => lsGet('watchedVideos', []))
   const [watchTimes, setWatchTimes] = useState(() => lsGet('watchTimes', {}))
   const [watchProgress, setWatchProgress] = useState(() => lsGet('watchProgress', {}))
@@ -62,26 +67,81 @@ function App() {
     })
   }
 
-  const fetchRandomShort = async () => {
-    // Save progress of current video before loading next
-    saveProgress()
+  // Build user_data payload for recommender
+  const buildUserPayload = () => {
+    const likedList = getLiked()
+    const videos = watchedVideos.slice(-20) // Last 20 watched
+    const likedFlags = videos.map(id => likedList.includes(id) ? 1 : 0)
+    const watchedScores = videos.map(id => {
+      const pct = watchProgress[id] || 50 // Default 50% if unknown
+      return Math.min(pct / 100, 2.0)     // Normalize to 0-2 scale
+    })
+    return { videos, liked: likedFlags, watched: watchedScores }
+  }
 
+  // Fetch recommendations from backend
+  const fetchRecommended = async () => {
+    const payload = buildUserPayload()
+    try {
+      const res = await fetch('/api/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (data.recommendations && data.recommendations.length > 0) {
+        return data.recommendations
+      }
+    } catch (err) {
+      console.warn('Recommendation fetch failed, falling back to random:', err)
+    }
+    return null
+  }
+
+  const showVideo = (data, recommended) => {
+    setVideo(data)
+    currentVideoRef.current = data
+    videoStartTime.current = Date.now()
+    setIsRecommended(recommended)
+    const likedList = getLiked()
+    setLiked(likedList.includes(data.yt_id))
+    recordWatch(data.yt_id)
+  }
+
+  const fetchNextVideo = async () => {
+    saveProgress()
     setLoading(true)
     setError(null)
+
     try {
+      // Try serving from recommendation queue first
+      if (recQueue.length > 0) {
+        const [next, ...rest] = recQueue
+        setRecQueue(rest)
+        showVideo(next, true)
+        setLoading(false)
+        return
+      }
+
+      // If enough history, try fetching new recommendations
+      if (watchedVideos.length >= REC_THRESHOLD) {
+        const recs = await fetchRecommended()
+        if (recs && recs.length > 0) {
+          const [first, ...rest] = recs
+          setRecQueue(rest)
+          showVideo(first, true)
+          setLoading(false)
+          return
+        }
+      }
+
+      // Fallback to random
       const res = await fetch('/api/random-short')
       const data = await res.json()
       if (data.error) {
         setError(data.error)
       } else {
-        setVideo(data)
-        currentVideoRef.current = data
-        videoStartTime.current = Date.now()
-        // Check if this video is liked via cookie
-        const likedList = getLiked()
-        setLiked(likedList.includes(data.yt_id))
-        // Record this video as watched + timestamp
-        recordWatch(data.yt_id)
+        showVideo(data, false)
       }
     } catch (err) {
       setError('Failed to fetch video: ' + err.message)
@@ -91,7 +151,7 @@ function App() {
   }
 
   useEffect(() => {
-    fetchRandomShort()
+    fetchNextVideo()
     // Save progress when user leaves page
     const handleBeforeUnload = () => saveProgress()
     window.addEventListener('beforeunload', handleBeforeUnload)
@@ -104,7 +164,7 @@ function App() {
       if (now - lastScrollTime.current > 1500) {
         if (e.deltaY > 50) {
           lastScrollTime.current = now
-          fetchRandomShort()
+          fetchNextVideo()
         }
       }
     }
@@ -138,6 +198,19 @@ function App() {
       {video && (
         <div>
           <h3>Playing: {video.title}</h3>
+          {isRecommended && (
+            <span style={{
+              display: 'inline-block',
+              background: '#e50914',
+              color: '#fff',
+              padding: '2px 10px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              marginBottom: '8px',
+            }}>
+              ✨ Recommended for you
+            </span>
+          )}
           <iframe
             key={video.yt_id}
             src={`https://www.youtube.com/embed/${video.yt_id}?autoplay=1&mute=1&loop=1&playlist=${video.yt_id}&playsinline=1`}
@@ -154,7 +227,7 @@ function App() {
               {liked ? 'Liked ❤️' : 'Like 🤍'}
             </button>
             <button 
-              onClick={fetchRandomShort} 
+              onClick={fetchNextVideo} 
               style={{ fontSize: '18px', padding: '10px 20px', margin: '5px', cursor: 'pointer' }}
             >
               Scroll / Next Video ➡️

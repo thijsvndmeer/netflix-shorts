@@ -1,14 +1,33 @@
 import os
 import random
 import csv
+import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List
+
+from recommender_system.netflix_recommender import recommender
 
 app = FastAPI()
 
-# Bepaal het pad naar de map met je CSV-bestanden
+# CORS — allow dev frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Paths
 CSV_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "datacsv"))
 YT_CSV_PATH = os.path.join(CSV_DIR, "yt2imdb.csv")
 IMDB_CSV_PATH = os.path.join(CSV_DIR, "imdb_metadata.csv")
+FEATURES_PATH = os.path.join(CSV_DIR, "shortend_features.h5")
+
+# Init recommender singleton
+rec = recommender(data_file=FEATURES_PATH, n=5, k=3, threshold=0.0)
+
 
 def load_data():
     """Leest beide CSV-files en combineert de data."""
@@ -71,3 +90,75 @@ def get_random_short():
         "title": movie_title,
         "clip_length": float(clip_length) if clip_length else None
     }
+
+
+# ─── Recommendation endpoint ────────────────────────────────────────
+
+class RecommendRequest(BaseModel):
+    videos: List[str]
+    liked: List[int]
+    watched: List[float]
+
+@app.post("/api/recommend")
+def get_recommendations(body: RecommendRequest):
+    print(f"API recommend request: {body.videos}")
+    import h5py
+    # Filter out videos not in h5 file to avoid KeyError in recommender
+    valid_videos = []
+    valid_liked = []
+    valid_watched = []
+    try:
+        with h5py.File(FEATURES_PATH, 'r') as f:
+            for vid, lk, wt in zip(body.videos, body.liked, body.watched):
+                if vid in f:
+                    valid_videos.append(vid)
+                    valid_liked.append(lk)
+                    valid_watched.append(wt)
+    except Exception as e:
+        print(f"Error checking h5 file: {e}")
+
+    print(f"API valid videos: {valid_videos}")
+    if not valid_videos:
+        print("API return empty recommendations (no valid videos)")
+        return {"recommendations": [], "fallback": True}
+
+    # Build DataFrame the recommender expects
+    user_data = pd.DataFrame({
+        "videos": valid_videos,
+        "liked": valid_liked,
+        "watched": valid_watched,
+    })
+
+    # Load metadata first to filter candidate video IDs
+    try:
+        yt_data, imdb_titles = load_data()
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+
+    allowed_videos = {row["yt_id"] for row in yt_data}
+
+    try:
+        rec_ids = rec.recommend(user_data, allowed_videos=allowed_videos)
+        print(f"API recommender output: {rec_ids}")
+    except Exception as e:
+        # Fallback: if recommendation fails (e.g. video not in h5 file), return empty
+        print(f"Recommendation error: {e}")
+        return {"recommendations": [], "fallback": True}
+
+    # Build lookup from yt_id -> row data
+    yt_lookup = {row["yt_id"]: row for row in yt_data}
+
+    results = []
+    for yt_id in rec_ids:
+        row = yt_lookup.get(yt_id, {})
+        imdb_id = row.get("imdb_id", "")
+        clip_length = row.get("clip_length", "")
+        title = imdb_titles.get(imdb_id, "Titel onbekend")
+        results.append({
+            "yt_id": yt_id,
+            "imdb_id": imdb_id,
+            "title": title,
+            "clip_length": float(clip_length) if clip_length else None,
+        })
+
+    return {"recommendations": results, "fallback": False}

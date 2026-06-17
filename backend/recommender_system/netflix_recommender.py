@@ -107,7 +107,7 @@ class recommender():
 
 ######################################################################################################################################################################################################################################################################################################################################################################################
 
-    def recommend(self, user_data):
+    def recommend(self, user_data, allowed_videos=None):
         #step 1: Construct sim_matrix based on user data
         sim_matrix = pd.DataFrame(columns=user_data['videos'])
 
@@ -126,6 +126,8 @@ class recommender():
                     #skips to the next video if it is in the user data, thereby insuring that a video is never recommende twice (can maybe be changed later idk)
                     if video in user_data['videos'].values:
                         continue
+                    if allowed_videos is not None and video not in allowed_videos:
+                        continue
                     feature_two = obj[:]
                     cos_sim = np.dot(feature_one, feature_two) / (np.linalg.norm(feature_one) * np.linalg.norm(feature_two))
                     content.append(cos_sim)
@@ -135,12 +137,14 @@ class recommender():
             sim_matrix[column] = content
             sim_matrix.index = index
 
+        sim_matrix = sim_matrix.astype(float)
+
         #step 2: find the k nearest neighbours for each video and vote
-        recommend = pd.Series()
+        recommend = pd.Series(dtype=float)
 
         for video, data in sim_matrix.iterrows():
             k_nearest = data.nlargest(self.k)
-            video_value = sum([user_data.loc[user_data['videos'] == video, 'watched'].item() * (1 + ((self.like - 1)* user_data.loc[user_data['videos'] == video, 'liked'].item())) * k_nearest[video] for video in k_nearest.index]) / k_nearest.sum()
+            video_value = sum([user_data.loc[user_data['videos'] == v, 'watched'].item() * (1 + ((self.like - 1)* user_data.loc[user_data['videos'] == v, 'liked'].item())) * k_nearest[v] for v in k_nearest.index]) / k_nearest.sum()
 
             if video_value > self.threshold: recommend[video] = video_value
 
