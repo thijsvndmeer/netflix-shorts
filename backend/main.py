@@ -26,7 +26,7 @@ IMDB_CSV_PATH = os.path.join(CSV_DIR, "imdb_metadata.csv")
 FEATURES_PATH = os.path.join(CSV_DIR, "shortend_features.h5")
 
 # Init recommender singleton
-rec = recommender(data_file=FEATURES_PATH, n=5, k=3, threshold=0.0)
+rec = recommender(data_file=FEATURES_PATH, n=5, k=3, threshold=0.5)
 
 
 def load_data():
