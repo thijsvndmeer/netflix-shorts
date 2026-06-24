@@ -63,7 +63,7 @@ def home():
     return {"message": "Netflix Shorts Backend draait op localhost!"}
 
 @app.get("/api/random-short")
-def get_random_short():
+def get_random_short(excluded: str = ""):
     try:
         # Laad de data (YouTube lijst + IMDb titels dictionary)
         yt_data, imdb_titles = load_data()
@@ -74,8 +74,16 @@ def get_random_short():
     if not yt_data:
         return {"error": "Geen YouTube IDs gevonden in het CSV-bestand."}
     
+    excluded_set = set(excluded.split(",")) if excluded else set()
+    
+    # Filter yt_data
+    valid_clips = [clip for clip in yt_data if clip["yt_id"] not in excluded_set]
+    if not valid_clips:
+        # If the user has literally watched everything, just pick from all
+        valid_clips = yt_data
+
     # Kies een willekeurige video uit de lijst
-    random_clip = random.choice(yt_data)
+    random_clip = random.choice(valid_clips)
     yt_id = random_clip["yt_id"]
     imdb_id = random_clip["imdb_id"]
     clip_length = random_clip.get("clip_length", "")
@@ -98,6 +106,7 @@ class RecommendRequest(BaseModel):
     videos: List[str]
     liked: List[int]
     watched: List[float]
+    excluded: List[str] = []
 
 @app.post("/api/recommend")
 def get_recommendations(body: RecommendRequest):
@@ -128,6 +137,11 @@ def get_recommendations(body: RecommendRequest):
         "liked": valid_liked,
         "watched": valid_watched,
     })
+    
+    print("\n=== INPUT DATAFRAME ===")
+    print(user_data.to_string())
+    print(f"Excluded count: {len(body.excluded)}")
+    print("=======================\n")
 
     # Load metadata first to filter candidate video IDs
     try:
@@ -136,6 +150,10 @@ def get_recommendations(body: RecommendRequest):
         return {"error": str(e)}
 
     allowed_videos = {row["yt_id"] for row in yt_data}
+
+    if body.excluded:
+        for ex in body.excluded:
+            allowed_videos.discard(ex)
 
     try:
         rec_ids = rec.recommend(user_data, allowed_videos=allowed_videos)
