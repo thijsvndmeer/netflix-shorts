@@ -34,6 +34,7 @@ function App() {
   const goNextVideoRef = useRef(null)
   const goPrevVideoRef = useRef(null)
   const touchStartX = useRef(null)
+  const touchStartY = useRef(null)
   const watchedVideosRef = useRef(lsGet('watchedVideos', []))
   const historyOffsetRef = useRef(0)
   const videoMetaRef = useRef(lsGet('videoMeta', {}))
@@ -53,31 +54,24 @@ function App() {
   }
 
   const handleTap = () => {
-    if (tapTimeoutRef.current) {
-      // Double tap detected
-      clearTimeout(tapTimeoutRef.current);
-      tapTimeoutRef.current = null;
-      if (!liked) {
-        setShowHeart(true);
-        setTimeout(() => setShowHeart(false), 800);
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      if (isPlaying) {
+        iframeRef.current.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+        setIsPlaying(false);
+      } else {
+        iframeRef.current.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+        setIsPlaying(true);
       }
-      toggleLike();
-      return;
     }
+  }
 
-    // Single tap - wait for possible double tap
-    tapTimeoutRef.current = setTimeout(() => {
-      tapTimeoutRef.current = null;
-      if (iframeRef.current && iframeRef.current.contentWindow) {
-        if (isPlaying) {
-          iframeRef.current.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
-          setIsPlaying(false);
-        } else {
-          iframeRef.current.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-          setIsPlaying(true);
-        }
-      }
-    }, 250);
+  const handleDoubleClick = (e) => {
+    e.preventDefault();
+    if (!liked) {
+      setShowHeart(true);
+      setTimeout(() => setShowHeart(false), 800);
+    }
+    toggleLike();
   }
 
   const [cookies, setCookie] = useCookies(['likedVideos'])
@@ -389,53 +383,86 @@ function App() {
                 transform: `translateX(${swipeOffset}px) rotate(${swipeOffset * 0.05}deg)`,
                 transformOrigin: 'bottom center',
                 transition: (swipeOffset === 0 || isAnimating) ? 'transform 0.3s ease' : 'none',
-                touchAction: 'pan-y',
+                touchAction: 'none',
                 zIndex: 1,
                 overflow: 'hidden',
                 borderRadius: '16px',
                 boxShadow: '0 10px 30px rgba(0,0,0,0.8)'
               }}
-              onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX }}
+              onDoubleClick={handleDoubleClick}
+              onTouchStart={(e) => { 
+                touchStartX.current = e.touches[0].clientX
+                touchStartY.current = e.touches[0].clientY
+              }}
               onTouchMove={(e) => {
-                if (touchStartX.current !== null) {
-                  setSwipeOffset(e.touches[0].clientX - touchStartX.current)
+                if (touchStartX.current !== null && touchStartY.current !== null) {
+                  const dX = e.touches[0].clientX - touchStartX.current
+                  const dY = e.touches[0].clientY - touchStartY.current
+                  if (Math.abs(dX) > Math.abs(dY)) {
+                    setSwipeOffset(dX)
+                  }
                 }
               }}
               onTouchEnd={(e) => {
-                if (touchStartX.current === null) return
+                if (touchStartX.current === null || touchStartY.current === null) return
                 const deltaX = e.changedTouches[0].clientX - touchStartX.current
-                if (Math.abs(deltaX) > 40) {
+                const deltaY = e.changedTouches[0].clientY - touchStartY.current
+                
+                if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 40) {
+                  // Vertical swipe
+                  if (deltaY < -40 && goNextVideoRef.current) goNextVideoRef.current()
+                  else if (deltaY > 40 && goPrevVideoRef.current) goPrevVideoRef.current()
+                  setSwipeOffset(0)
+                } else if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 40) {
+                  // Horizontal swipe
                   triggerImdbSwipe(Math.sign(deltaX))
-                } else if (Math.abs(deltaX) < 5) {
+                } else if (Math.abs(deltaX) < 5 && Math.abs(deltaY) < 5) {
+                  // Tap
                   handleTap()
                   setSwipeOffset(0)
                 } else {
                   setSwipeOffset(0)
                 }
                 touchStartX.current = null
+                touchStartY.current = null
               }}
-              onMouseDown={(e) => { touchStartX.current = e.clientX }}
+              onMouseDown={(e) => { 
+                touchStartX.current = e.clientX
+                touchStartY.current = e.clientY 
+              }}
               onMouseMove={(e) => {
-                if (touchStartX.current !== null) {
-                  setSwipeOffset(e.clientX - touchStartX.current)
+                if (touchStartX.current !== null && touchStartY.current !== null) {
+                  const dX = e.clientX - touchStartX.current
+                  const dY = e.clientY - touchStartY.current
+                  if (Math.abs(dX) > Math.abs(dY)) {
+                    setSwipeOffset(dX)
+                  }
                 }
               }}
               onMouseUp={(e) => {
-                if (touchStartX.current === null) return
+                if (touchStartX.current === null || touchStartY.current === null) return
                 const deltaX = e.clientX - touchStartX.current
-                if (Math.abs(deltaX) > 40) {
+                const deltaY = e.clientY - touchStartY.current
+                
+                if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 40) {
+                  if (deltaY < -40 && goNextVideoRef.current) goNextVideoRef.current()
+                  else if (deltaY > 40 && goPrevVideoRef.current) goPrevVideoRef.current()
+                  setSwipeOffset(0)
+                } else if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 40) {
                   triggerImdbSwipe(Math.sign(deltaX))
-                } else if (Math.abs(deltaX) < 5) {
+                } else if (Math.abs(deltaX) < 5 && Math.abs(deltaY) < 5) {
                   handleTap()
                   setSwipeOffset(0)
                 } else {
                   setSwipeOffset(0)
                 }
                 touchStartX.current = null
+                touchStartY.current = null
               }}
               onMouseLeave={() => {
                 setSwipeOffset(0)
                 touchStartX.current = null
+                touchStartY.current = null
               }}
             >
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '80px', background: 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%)', pointerEvents: 'none', zIndex: 15, borderRadius: '16px 16px 0 0' }}></div>
