@@ -93,17 +93,29 @@ def restructure_features(input_file, output_file):
                 del f[group]
 
 class recommender():
-    def __init__(self, data_file, n: int = 5, k: int = 3, like_strenght: bool = 1.4, threshold: bool = 1.3, method: str = 'top'):
+    def __init__(self, data_file, n: int = 5, k: int = 3, like_strenght: bool = 1.4, threshold: bool = 1.3, selection_method: str = 'top', prediction_target: str = 'watchtime'):
         self.n = n
         self.k = k
         self.like = like_strenght
         self.feature_file = data_file
         self.threshold = threshold
+        self.method = selection_method
+        self.prediction_target = prediction_target
         print(f'recommender enabled with video embeddings from {self.feature_file}')
 
     def change_file(self, data_file):
         self.feature_file = data_file
         print(f'changed datafile to {self.feature_file}')
+
+    def change_hyperparameter(self, parameter, value):
+        match parameter:
+            case 'n': self.n = value
+            case 'k': self.k = value
+            case 'like_strenght': self.like = value
+            case 'threshold': self.k = value
+            case 'method': self.method = value
+            case 'prediction_target': self.prediction_target = value
+
 
 ######################################################################################################################################################################################################################################################################################################################################################################################
 
@@ -140,13 +152,25 @@ class recommender():
 
         for video, data in sim_matrix.iterrows():
             k_nearest = data.nlargest(self.k)
-            video_value = sum([user_data.loc[user_data['videos'] == v, 'watched'].item() * (1 + ((self.like - 1)* user_data.loc[user_data['videos'] == v, 'liked'].item())) * k_nearest[v] for v in k_nearest.index]) / k_nearest.sum()
+
+            match self.prediction_target:
+
+                case 'watchtime':
+                    video_value = sum([user_data.loc[user_data['videos'] == v, 'watched'].item() * (1 + ((self.like - 1)* user_data.loc[user_data['videos'] == v, 'liked'].item())) * k_nearest[v] for v in k_nearest.index]) / k_nearest.sum()
+
+                case 'like':
+                    video_value = sum([user_data.loc[user_data['videos'] == v, 'liked'].item() * k_nearest[v] for v in k_nearest.index])
 
             if video_value > self.threshold: recommend[video] = video_value
 
 
         #step 3: randomly select videos to recommend
-        return([video for video, value in recommend.nlargest(self.n).items()])
+        match self.method:
+
+            case 'top': recommendation = [video for video, value in recommend.nlargest(self.n).items()]
+            case 'random': recommendation = [video for video in recommend.sample(n=self.n).items()]
+
+        return recommendation
 
 def user_example():
     data = {
