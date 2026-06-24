@@ -19,17 +19,25 @@ function App() {
   const [watchedVideos, setWatchedVideos] = useState(() => lsGet('watchedVideos', []))
   const [watchTimes, setWatchTimes] = useState(() => lsGet('watchTimes', {}))
   const [watchProgress, setWatchProgress] = useState(() => lsGet('watchProgress', {}))
+  const [videoMeta, setVideoMeta] = useState(() => lsGet('videoMeta', {}))
   const [isRecommended, setIsRecommended] = useState(false)
   const [recQueue, setRecQueue] = useState([])
   const [swipeOffset, setSwipeOffset] = useState(0)
   const [isAnimating, setIsAnimating] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [showHeart, setShowHeart] = useState(false)
   const iframeRef = useRef(null)
   const lastScrollTime = useRef(0)
   const videoStartTime = useRef(null)
   const currentVideoRef = useRef(null)
   const fetchNextVideoRef = useRef(null)
+  const goNextVideoRef = useRef(null)
+  const goPrevVideoRef = useRef(null)
   const touchStartX = useRef(null)
+  const watchedVideosRef = useRef(lsGet('watchedVideos', []))
+  const historyOffsetRef = useRef(0)
+  const videoMetaRef = useRef(lsGet('videoMeta', {}))
+  const tapTimeoutRef = useRef(null)
   const REC_THRESHOLD = 5
 
   const triggerImdbSwipe = (direction) => {
@@ -45,15 +53,31 @@ function App() {
   }
 
   const handleTap = () => {
-    if (iframeRef.current && iframeRef.current.contentWindow) {
-      if (isPlaying) {
-        iframeRef.current.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
-        setIsPlaying(false);
-      } else {
-        iframeRef.current.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-        setIsPlaying(true);
+    if (tapTimeoutRef.current) {
+      // Double tap detected
+      clearTimeout(tapTimeoutRef.current);
+      tapTimeoutRef.current = null;
+      if (!liked) {
+        setShowHeart(true);
+        setTimeout(() => setShowHeart(false), 800);
       }
+      toggleLike();
+      return;
     }
+
+    // Single tap - wait for possible double tap
+    tapTimeoutRef.current = setTimeout(() => {
+      tapTimeoutRef.current = null;
+      if (iframeRef.current && iframeRef.current.contentWindow) {
+        if (isPlaying) {
+          iframeRef.current.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+          setIsPlaying(false);
+        } else {
+          iframeRef.current.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+          setIsPlaying(true);
+        }
+      }
+    }, 250);
   }
 
   const [cookies, setCookie] = useCookies(['likedVideos'])
@@ -85,6 +109,7 @@ function App() {
       if (prev.includes(ytId)) return prev
       const next = [...prev, ytId]
       lsSet('watchedVideos', next)
+      watchedVideosRef.current = next
       return next
     })
     setWatchTimes(prev => {
@@ -130,14 +155,52 @@ function App() {
     return null
   }
 
-  const showVideo = (data, recommended) => {
+  const applyVideoState = (data) => {
     setVideo(data)
     currentVideoRef.current = data
     videoStartTime.current = Date.now()
-    setIsRecommended(recommended)
+    setIsRecommended(data.recommended || false)
     
     const likedList = getLiked()
     setLiked(likedList.includes(data.yt_id))
+  }
+
+  const goPrevVideo = () => {
+    const list = watchedVideosRef.current
+    if (historyOffsetRef.current < list.length - 1) {
+      saveProgress()
+      historyOffsetRef.current += 1
+      const ytId = list[list.length - 1 - historyOffsetRef.current]
+      const meta = videoMetaRef.current[ytId] || { yt_id: ytId, title: `History: ${ytId}` }
+      applyVideoState(meta)
+    }
+  }
+
+  const goNextVideo = () => {
+    if (historyOffsetRef.current > 0) {
+      saveProgress()
+      historyOffsetRef.current -= 1
+      const list = watchedVideosRef.current
+      const ytId = list[list.length - 1 - historyOffsetRef.current]
+      const meta = videoMetaRef.current[ytId] || { yt_id: ytId, title: `History: ${ytId}` }
+      applyVideoState(meta)
+    } else {
+      fetchNextVideo()
+    }
+  }
+
+  const showVideo = (data, recommended) => {
+    historyOffsetRef.current = 0
+    const metaObj = { ...data, recommended }
+    
+    setVideoMeta(prev => {
+      const next = { ...prev, [data.yt_id]: metaObj }
+      lsSet('videoMeta', next)
+      videoMetaRef.current = next
+      return next
+    })
+
+    applyVideoState(metaObj)
     recordWatch(data.yt_id)
   }
 
@@ -195,7 +258,9 @@ function App() {
 
   useEffect(() => {
     fetchNextVideoRef.current = fetchNextVideo
-  }, [fetchNextVideo])
+    goNextVideoRef.current = goNextVideo
+    goPrevVideoRef.current = goPrevVideo
+  }, [fetchNextVideo, goNextVideo, goPrevVideo])
 
   useEffect(() => {
     const handleWheel = (e) => {
@@ -203,9 +268,10 @@ function App() {
       if (now - lastScrollTime.current > 1500) {
         if (e.deltaY > 50) {
           lastScrollTime.current = now
-          if (fetchNextVideoRef.current) {
-            fetchNextVideoRef.current()
-          }
+          if (goNextVideoRef.current) goNextVideoRef.current()
+        } else if (e.deltaY < -50) {
+          lastScrollTime.current = now
+          if (goPrevVideoRef.current) goPrevVideoRef.current()
         } else if (Math.abs(e.deltaX) > 50) {
           lastScrollTime.current = now
           triggerImdbSwipe(Math.sign(e.deltaX))
@@ -231,6 +297,18 @@ function App() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  useEffect(() => {
+    let interval;
+    if (video && !isPlaying) {
+      interval = setInterval(() => {
+        if (iframeRef.current && iframeRef.current.contentWindow) {
+          iframeRef.current.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+        }
+      }, 500);
+    }
+    return () => clearInterval(interval);
+  }, [video, isPlaying]);
+
   const toggleLike = () => {
     if (!video) return
     const likedList = getLiked()
@@ -248,7 +326,17 @@ function App() {
   }
 
   return (
-    <div style={{ textAlign: 'center', padding: '10px 20px', backgroundColor: '#141414', color: '#fff', height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ textAlign: 'center', padding: '10px 20px', backgroundColor: '#141414', color: '#fff', height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, sans-serif', userSelect: 'none', WebkitUserSelect: 'none' }}>
+      <style>
+        {`
+          @keyframes heartFloat {
+            0% { transform: scale(0); opacity: 1; }
+            15% { transform: scale(1.2); opacity: 1; }
+            30% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.5) translateY(-60px); opacity: 0; }
+          }
+        `}
+      </style>
       <h1 style={{ color: '#e50914', margin: '0 0 10px 0', fontSize: '24px', fontWeight: '800', flexShrink: 0 }}>Netflix Shorts</h1>
       
       {loading && <p>Loading next video...</p>}
@@ -302,7 +390,10 @@ function App() {
                 transformOrigin: 'bottom center',
                 transition: (swipeOffset === 0 || isAnimating) ? 'transform 0.3s ease' : 'none',
                 touchAction: 'pan-y',
-                zIndex: 1
+                zIndex: 1,
+                overflow: 'hidden',
+                borderRadius: '16px',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.8)'
               }}
               onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX }}
               onTouchMove={(e) => {
@@ -313,7 +404,7 @@ function App() {
               onTouchEnd={(e) => {
                 if (touchStartX.current === null) return
                 const deltaX = e.changedTouches[0].clientX - touchStartX.current
-                if (Math.abs(deltaX) > 100) {
+                if (Math.abs(deltaX) > 40) {
                   triggerImdbSwipe(Math.sign(deltaX))
                 } else if (Math.abs(deltaX) < 5) {
                   handleTap()
@@ -332,7 +423,7 @@ function App() {
               onMouseUp={(e) => {
                 if (touchStartX.current === null) return
                 const deltaX = e.clientX - touchStartX.current
-                if (Math.abs(deltaX) > 100) {
+                if (Math.abs(deltaX) > 40) {
                   triggerImdbSwipe(Math.sign(deltaX))
                 } else if (Math.abs(deltaX) < 5) {
                   handleTap()
@@ -347,6 +438,13 @@ function App() {
                 touchStartX.current = null
               }}
             >
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '80px', background: 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%)', pointerEvents: 'none', zIndex: 15, borderRadius: '16px 16px 0 0' }}></div>
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '80px', background: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%)', pointerEvents: 'none', zIndex: 15, borderRadius: '0 0 16px 16px' }}></div>
+              {showHeart && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 30, animation: 'heartFloat 0.8s ease-out forwards' }}>
+                  <span style={{ fontSize: '100px', filter: 'drop-shadow(0 10px 20px rgba(0,0,0,0.5))' }}>❤️</span>
+                </div>
+              )}
               {!isPlaying && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 20 }}>
                   <div style={{ width: '80px', height: '80px', background: 'rgba(0,0,0,0.7)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -357,9 +455,9 @@ function App() {
               <iframe
                 ref={iframeRef}
                 key={video.yt_id}
-                src={`https://www.youtube.com/embed/${video.yt_id}?autoplay=1&mute=1&loop=1&playlist=${video.yt_id}&playsinline=1&enablejsapi=1&controls=0`}
+                src={`https://www.youtube.com/embed/${video.yt_id}?autoplay=1&mute=1&loop=1&playlist=${video.yt_id}&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1`}
                 title={video.title}
-                style={{ width: '100%', height: '100%', display: 'block', background: '#000', border: 'none', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.8)', pointerEvents: 'none' }}
+                style={{ position: 'absolute', top: '-70px', left: 0, width: '100%', height: 'calc(100% + 140px)', display: 'block', background: '#000', border: 'none', pointerEvents: 'none' }}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
                 onLoad={() => {
@@ -378,18 +476,8 @@ function App() {
             >
               {liked ? 'Liked ❤️' : 'Like 🤍'}
             </button>
-            <button 
-              onClick={() => {
-                if (video && video.imdb_id) {
-                  window.open(`https://www.imdb.com/title/${video.imdb_id}`, '_blank')
-                }
-              }} 
-              style={{ fontSize: '16px', fontWeight: 'bold', padding: '12px 24px', cursor: 'pointer', borderRadius: '24px', border: 'none', background: '#f5c518', color: '#000', transition: 'all 0.2s' }}
-            >
-              View on IMDB 🎬
-            </button>
           </div>
-          <p style={{ color: '#888', fontSize: '12px', flexShrink: 0, margin: '0 0 10px 0' }}>Tip: Scroll down with mouse wheel to load next video</p>
+          <p style={{ color: '#888', fontSize: '12px', flexShrink: 0, margin: '0 0 10px 0' }}>Tip: Swipe left or right to view on IMDB. Scroll down to load next video.</p>
 
           {showHistory && (
             <div style={{ marginTop: '25px', textAlign: 'left', maxWidth: '400px', margin: '25px auto 0', background: '#1e1e1e', padding: '20px', borderRadius: '16px' }}>

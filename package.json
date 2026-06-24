@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -k -n frontend,backend \"npm run dev --prefix frontend\" \"npm run dev --prefix backend\""
+    "dev": "concurrently -k -n frontend,backend \"npm run dev --prefix frontend\" \"npm run dev --prefix backend\"",
+    "host": "concurrently -k -n frontend,backend \"npm run host --prefix frontend\" \"npm run host --prefix backend\"",
+    "tunnel": "concurrently -k -n app,tunnel \"npm run host\" \"npx localtunnel --port 5173\""
   },
   "devDependencies": {
     "concurrently": "^10.0.3"

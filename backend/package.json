@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "..\\..\\.venv\\Scripts\\python.exe -m uvicorn main:app --port 8000 --reload",
+    "dev": ".venv/bin/python -m uvicorn main:app --port 8000 --reload",
+    "host": ".venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

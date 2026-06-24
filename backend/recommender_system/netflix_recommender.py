@@ -119,7 +119,7 @@ class recommender():
 
 ######################################################################################################################################################################################################################################################################################################################################################################################
 
-    def recommend(self, user_data):
+    def recommend(self, user_data, allowed_videos=None):
         #step 1: Construct sim_matrix based on user data
         sim_matrix = pd.DataFrame(columns=user_data['videos'])
 
@@ -137,6 +137,8 @@ class recommender():
                 for video, obj in f.items():
                     #skips to the next video if it is in the user data, thereby insuring that a video is never recommende twice (can maybe be changed later idk)
                     if video in user_data['videos'].values:
+                        continue
+                    if allowed_videos is not None and video not in allowed_videos:
                         continue
                     feature_two = obj[:]
                     cos_sim = np.dot(feature_one, feature_two) / (np.linalg.norm(feature_one) * np.linalg.norm(feature_two))
